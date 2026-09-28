@@ -133,6 +133,58 @@ impl Builder {
         self
     }
 
+    /// Run one execution of the model, using bytes to choose its execution path.
+    ///
+    /// At each choice with multiple eligible outcomes, consumes one byte and
+    /// selects `byte % number_of_outcomes`. Thread choices are ordered by Loom
+    /// thread ID. Atomic read outcomes (including read-modify-write operations)
+    /// and spurious wakeups use the same input stream.
+    /// Choices with a single outcome consume no input. Exhausted input selects
+    /// the first outcome, and unused bytes are ignored.
+    ///
+    /// The model must be deterministic apart from Loom's modeled operations for
+    /// the same input to reproduce an execution. Replay across Loom versions is
+    /// not guaranteed. Input is copied into the execution before the model runs.
+    ///
+    /// Respects `max_threads`, `max_branches`, `preemption_bound`, `location`,
+    /// `log`, and explicit exploration boundaries. While exploration is disabled,
+    /// Loom uses its usual initial choices without consuming input.
+    /// Checkpoint and permutation
+    /// settings, including `max_duration`, are unused for this single execution.
+    ///
+    /// # Panics
+    ///
+    /// Model failures and exceeded execution limits panic as in [`Builder::check`].
+    /// An input-selected execution, including the fallback after input exhaustion,
+    /// can starve a thread and exceed `max_branches` even for a correct model.
+    /// Reaching this limit does not establish a concurrency bug.
+    ///
+    /// ```
+    /// let input = [5, 2];
+    /// loom::model::Builder::new().check_with_input(&input, || {
+    ///     let child = loom::thread::spawn(|| {});
+    ///     child.join().unwrap();
+    /// });
+    /// ```
+    pub fn check_with_input<F>(&self, input: &[u8], f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let _span = tracing::info_span!("iter", message = 1).entered();
+        let mut execution = Execution::new(
+            self.max_threads,
+            self.max_branches,
+            self.preemption_bound,
+            !self.expect_explicit_explore,
+        );
+        execution.path.set_input(input);
+        execution.log = self.log;
+        execution.location = self.location;
+
+        let mut scheduler = Scheduler::new(self.max_threads);
+        run_execution(&mut execution, &mut scheduler, f);
+    }
+
     /// Check the provided model.
     pub fn check<F>(&self, f: F)
     where
