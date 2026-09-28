@@ -190,18 +190,7 @@ impl Builder {
 
             let f = f.clone();
 
-            scheduler.run(&mut execution, move || {
-                f();
-
-                let lazy_statics = rt::execution(|execution| execution.lazy_statics.drop());
-
-                // drop outside of execution
-                drop(lazy_statics);
-
-                rt::thread_done();
-            });
-
-            execution.check_for_leaks();
+            run_execution(&mut execution, &mut scheduler, move || f());
 
             i += 1;
 
@@ -223,6 +212,20 @@ impl Default for Builder {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn run_execution<F>(execution: &mut Execution, scheduler: &mut Scheduler, f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    scheduler.run(execution, move || {
+        f();
+        let lazy_statics = rt::execution(|execution| execution.lazy_statics.drop());
+        // Destructors may use Loom operations, so run them outside rt::execution.
+        drop(lazy_statics);
+        rt::thread_done();
+    });
+    execution.check_for_leaks();
 }
 
 /// Run all concurrent permutations of the provided closure.
