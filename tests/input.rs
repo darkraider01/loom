@@ -57,6 +57,49 @@ fn input_replays_and_changes_execution() {
     assert!(changed, "input should affect the execution");
 }
 
+fn atomic_history(input: &[u8]) -> (usize, Vec<u8>) {
+    let output = StdArc::new(Mutex::new((None, Vec::new())));
+    let result = output.clone();
+    Builder::new().check_with_input(input, move || {
+        let value = Arc::new(AtomicUsize::new(0));
+        let first = value.clone();
+        let first_result = result.clone();
+        let a = thread::spawn(move || {
+            first.store(1, Ordering::Relaxed);
+            first_result.lock().unwrap().1.push(b'a');
+        });
+        let second = value.clone();
+        let second_result = result.clone();
+        let b = thread::spawn(move || {
+            second.store(2, Ordering::Relaxed);
+            second_result.lock().unwrap().1.push(b'b');
+        });
+        let observed = value.load(Ordering::Relaxed);
+        {
+            let mut output = result.lock().unwrap();
+            output.0 = Some(observed);
+            output.1.push(b'r');
+        }
+        a.join().unwrap();
+        b.join().unwrap();
+    });
+    let value = output.lock().unwrap();
+    (value.0.unwrap(), value.1.clone())
+}
+
+#[test]
+fn input_selects_different_atomic_read_histories() {
+    let older_input = [1, 1, 0, 0, 0, 0, 0, 0];
+    let newer_input = [1, 1, 0, 0, 1, 0, 0, 0];
+    let older = atomic_history(&older_input);
+    let newer = atomic_history(&newer_input);
+
+    assert_eq!(older, (0, vec![b'a', b'r', b'b']));
+    assert_eq!(newer, (1, vec![b'a', b'r', b'b']));
+    assert_eq!(atomic_history(&older_input), older);
+    assert_eq!(atomic_history(&newer_input), newer);
+}
+
 #[test]
 fn runs_once_even_with_checkpoint_settings() {
     let calls = StdArc::new(std::sync::atomic::AtomicUsize::new(0));

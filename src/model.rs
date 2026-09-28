@@ -149,8 +149,8 @@ impl Builder {
     /// Respects `max_threads`, `max_branches`, `preemption_bound`, `location`,
     /// `log`, and explicit exploration boundaries. While exploration is disabled,
     /// Loom uses its usual initial choices without consuming input.
-    /// Checkpoint and permutation
-    /// settings, including `max_duration`, are unused for this single execution.
+    /// Checkpoint and permutation settings, including `max_duration`, are unused
+    /// because this method runs only one execution.
     ///
     /// # Panics
     ///
